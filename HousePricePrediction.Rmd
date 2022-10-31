@@ -1,6 +1,6 @@
 ---
 title: "House Price Prediction"
-author: "Deepti Vijay Khandagale"
+author: "Awantika Shah"
 date: "5/7/2022"
 output: html_document
 ---
