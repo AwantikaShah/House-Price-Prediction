@@ -1,0 +1,591 @@
+---
+title: "House Price Prediction"
+author: "Deepti Vijay Khandagale"
+date: "5/7/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("G:/GMU/STAT-515 Applied Stattistics & Visulization of Analytics/project")
+source("DataCleaning.R")
+library(dplyr)
+library(psych)
+library(Hmisc)
+library(ggplot2)
+library(mice)
+library(VIM)
+library(missForest)
+library(comprehenr)
+library(ggpubr)
+library(glmnet)
+library(MASS)
+library(randomForest)
+library(caret)
+library(Metrics)
+```
+
+## House Price Prediction
+
+Ask a home buyer to describe their dream house, and they probably won't begin with the height of the basement ceiling or the proximity to an east-west railroad. But this playground competition's dataset proves that much more influences price negotiations than the number of bedrooms or a white-picket fence.
+
+With 79 explanatory variables describing (almost) every aspect of residential homes in Ames, Iowa, this competition challenges you to predict the final price of each home.
+
+```{r house price data , echo=TRUE}
+train_house <- read.csv("train.csv")
+head(train_house)
+```
+
+
+## Exploratory Data Analysis
+
+### Missing Values and Imputation  
+
+1. Dropping Columns with more than 40% missing values which are: 
+  - PoolQC
+  - MiscFeature
+  - Alley
+  - Fence
+  - FireplaceQu
+
+```{r pressure, echo=FALSE}
+na_cols <- data.frame(colSums(is.na(train_house)))
+na_cols <- cbind(Col_name = rownames(na_cols), na_cols)
+colnames(na_cols ) <- c( 'Col_name' , 'Missing_Count')
+na_cols <- na_cols[na_cols$Missing_Count != 0 , ]
+na_cols <- na_cols[order(- na_cols$Missing_Count) , ]
+rownames(na_cols) <- 1:nrow(na_cols)
+na_cols$Total <- 1460
+na_cols$perc_missing <- round(na_cols$Missing_Count / na_cols$Total , 3)
+head(na_cols)
+```
+
+Other missing columns are 
+```{r missing, echo=FALSE}
+na_cols <- data.frame(colSums(is.na(train_house)))
+na_cols <- cbind(Col_name = rownames(na_cols), na_cols)
+colnames(na_cols ) <- c( 'Col_name' , 'Missing_Count')
+na_cols <- na_cols[na_cols$Missing_Count != 0 , ]
+na_cols <- na_cols[order(- na_cols$Missing_Count) , ]
+rownames(na_cols) <- 1:nrow(na_cols)
+na_cols$Total <- 1460
+na_cols$perc_missing <- round(na_cols$Missing_Count / na_cols$Total , 3)
+na_cols[na_cols$perc_missing < 0.4, ]
+```
+### Feature Engineering 
+
+#### Categorical Variables 
+
+There are couple of ways to handle the categorical variables. 
+- Create Dummy Variables 
+- Convert it into some ordinal data
+
+
+#### Year of Construction
+
+
+```{r YearBuild , echo=FALSE}
+
+train_house$NumYear <-  (train_house$YearRemodAdd - train_house$YearBuilt)
+train_house$YearBuilt <- as.factor(train_house$YearBuilt)
+train_house$GarageYrBlt <- as.factor(train_house$GarageYrBlt)
+train_house$YearRemodAdd <- as.factor(train_house$YearRemodAdd)
+train_house$YrSold <- as.factor(train_house$YrSold)
+
+
+
+
+yearBuilt <- ggplot(train_house , aes(x = YearBuilt , y = SalePrice)) + geom_boxplot() 
+yearRemodled <- ggplot(train_house , aes(x = YearRemodAdd , y = SalePrice)) + geom_boxplot()
+GarageYrBlt <- ggplot(train_house , aes(x = GarageYrBlt , y = SalePrice)) + geom_boxplot()
+YrSold <- ggplot(train_house , aes(x = YrSold , y = SalePrice)) + geom_boxplot()
+
+
+#scatter <- ggplot(train_house , aes(x = NumYear , y = SalePrice)) + geom_point()
+ggarrange(yearBuilt, yearRemodled , GarageYrBlt , YrSold
+          ,  ncol = 2, nrow = 2)
+
+```
+
+
+#### Basement
+
+```{r Basement, echo= FALSE}
+
+
+BsmtCond <- ggplot(subset(train_house , !is.na(train_house$BsmtCond)) 
+       , aes(x = reorder(BsmtCond , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("BsmtCond")
+
+BsmtExposure <- ggplot(subset(train_house , !is.na(train_house$BsmtExposure)) 
+       , aes(x = reorder(BsmtExposure , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("BsmtExposure")
+
+BsmtFinType1 <- ggplot(subset(train_house , !is.na(train_house$BsmtFinType1)) 
+       , aes(x = reorder(BsmtFinType1 , SalePrice) , y = SalePrice)) + 
+  geom_boxplot() + scale_x_discrete("BsmtFinType1")
+
+BsmtFinType2 <- ggplot(subset(train_house , !is.na(train_house$BsmtFinType2)) 
+       , aes(x = reorder(BsmtFinType2 , SalePrice) , y = SalePrice)) + 
+  geom_boxplot() + scale_x_discrete("BsmtFinType2")
+
+BsmtQual <- ggplot(subset(train_house , !is.na(train_house$BsmtQual)) 
+       , aes(x = reorder(BsmtQual , SalePrice) , y = SalePrice)) + 
+  geom_boxplot() + scale_x_discrete("BsmtQual")
+
+ggarrange(BsmtCond, BsmtExposure , BsmtFinType1 , BsmtFinType2, BsmtQual
+          ,  ncol = 3, nrow = 2)
+
+```
+
+
+#### Garage 
+
+```{r Garage, echo= FALSE}
+
+
+GarageCond <- ggplot(subset(train_house , !is.na(train_house$GarageCond)) 
+       , aes(x = reorder(GarageCond , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("GarageCond")
+
+GarageFinish <- ggplot(subset(train_house , !is.na(train_house$GarageFinish)) 
+       , aes(x = reorder(GarageFinish , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("GarageFinish")
+
+GarageQual <- ggplot(subset(train_house , !is.na(train_house$GarageQual)) 
+       , aes(x = reorder(GarageQual , SalePrice) , y = SalePrice)) + 
+  geom_boxplot() + scale_x_discrete("GarageQual")
+
+GarageType <- ggplot(subset(train_house , !is.na(train_house$GarageType)) 
+       , aes(x = reorder(GarageType , SalePrice) , y = SalePrice)) + 
+  geom_boxplot() + scale_x_discrete("GarageType")
+
+
+ggarrange( GarageCond , GarageFinish , GarageQual, GarageType
+          ,  ncol = 2, nrow = 2)
+
+# ggplot(train_house , aes(x = BsmtFinSF1 , y = SalePrice)) + geom_point()
+# ggplot(train_house , aes(x = BsmtFinSF2 , y = SalePrice)) + geom_point()
+```
+
+#### Exterior
+
+
+```{r Exterior, echo= FALSE}
+
+
+ExterCond <- ggplot(subset(train_house , !is.na(train_house$ExterCond)) 
+       , aes(x = reorder(ExterCond , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("ExterCond")
+
+Exterior1st <- ggplot(subset(train_house , !is.na(train_house$Exterior1st)) 
+       , aes(x = reorder(Exterior1st , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("Exterior1st") + theme(axis.text.x = element_text(angle = 90))
+
+Exterior2nd <- ggplot(subset(train_house , !is.na(train_house$Exterior2nd)) 
+       , aes(x = reorder(Exterior2nd , SalePrice) , y = SalePrice)) + 
+  geom_boxplot() + scale_x_discrete("Exterior2nd") + theme(axis.text.x = element_text(angle = 90))
+
+ExterQual <- ggplot(subset(train_house , !is.na(train_house$ExterQual)) 
+       , aes(x = reorder(ExterQual , SalePrice) , y = SalePrice)) + 
+  geom_boxplot() + scale_x_discrete("ExterQual")
+
+
+ggarrange( ExterCond , Exterior1st , Exterior2nd, ExterQual
+          ,  ncol = 2, nrow = 2)
+```
+
+
+
+
+#### Construction 
+
+```{r Construction, echo= FALSE}
+
+
+Foundation <- ggplot(subset(train_house , !is.na(train_house$Foundation)) 
+       , aes(x = reorder(Foundation , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("Foundation")
+
+LandContour <- ggplot(subset(train_house , !is.na(train_house$LandContour)) 
+       , aes(x = reorder(LandContour , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("LandContour") 
+
+LandSlope <- ggplot(subset(train_house , !is.na(train_house$LandSlope)) 
+       , aes(x = reorder(LandSlope , SalePrice) , y = SalePrice)) + 
+  geom_boxplot() + scale_x_discrete("LandSlope") 
+
+BldgType <- ggplot(subset(train_house , !is.na(train_house$BldgType)) 
+       , aes(x = reorder(BldgType , SalePrice) , y = SalePrice)) + 
+  geom_boxplot() + scale_x_discrete("BldgType")
+
+MasVnrType <- ggplot(subset(train_house , !is.na(train_house$MasVnrType)) 
+       , aes(x = reorder(MasVnrType , SalePrice) , y = SalePrice)) + 
+  geom_boxplot() + scale_x_discrete("MasVnrType")
+
+
+LotShape <- ggplot(subset(train_house , !is.na(train_house$LotShape)) 
+       , aes(x = reorder(LotShape , SalePrice) , y = SalePrice)) + 
+  geom_boxplot() + scale_x_discrete("LotShape")
+
+KitchenQual <- ggplot(subset(train_house , !is.na(train_house$KitchenQual)) 
+       , aes(x = reorder(KitchenQual , SalePrice) , y = SalePrice)) + 
+  geom_boxplot() + scale_x_discrete("KitchenQual")
+
+RoofMatl <- ggplot(subset(train_house , !is.na(train_house$RoofMatl)) 
+       , aes(x = reorder(RoofMatl , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("RoofMatl") + theme(axis.text.x = element_text(angle = 90))
+
+RoofStyle <- ggplot(subset(train_house , !is.na(train_house$RoofStyle)) 
+       , aes(x = reorder(RoofStyle , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("RoofStyle") + theme(axis.text.x = element_text(angle = 90))
+
+
+
+ggarrange( Foundation , LandContour , LandSlope, BldgType , MasVnrType 
+           ,LotShape , KitchenQual , RoofMatl , RoofStyle 
+          ,  ncol = 3, nrow = 3)
+```
+
+
+#### Location 
+
+```{r Location, echo= FALSE}
+
+
+Condition1 <- ggplot(subset(train_house , !is.na(train_house$Condition1)) 
+       , aes(x = reorder(Condition1 , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("Condition1") + theme(axis.text.x = element_text(angle = 90))
+
+Condition2 <- ggplot(subset(train_house , !is.na(train_house$Condition2)) 
+       , aes(x = reorder(Condition2 , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("Condition2") + theme(axis.text.x = element_text(angle = 90))
+
+MSZoning <- ggplot(subset(train_house , !is.na(train_house$MSZoning)) 
+       , aes(x = reorder(MSZoning , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("MSZoning") + theme(axis.text.x = element_text(angle = 90))
+
+Neighborhood <- ggplot(subset(train_house , !is.na(train_house$Neighborhood)) 
+       , aes(x = reorder(Neighborhood , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("Neighborhood") + theme(axis.text.x = element_text(angle = 90))
+
+
+PavedDrive <- ggplot(subset(train_house , !is.na(train_house$PavedDrive)) 
+       , aes(x = reorder(PavedDrive , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("PavedDrive") + theme(axis.text.x = element_text(angle = 90))
+
+
+
+ggarrange(  Condition1 ,  Condition2 ,  MSZoning , Neighborhood  , PavedDrive
+          ,  ncol = 3, nrow = 2)
+```
+#### Misc 
+
+```{r Misc, echo= FALSE}
+
+
+CentralAir <- ggplot(subset(train_house , !is.na(train_house$CentralAir)) 
+       , aes(x = reorder(CentralAir , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("CentralAir") + theme(axis.text.x = element_text(angle = 90))
+
+Electrical <- ggplot(subset(train_house , !is.na(train_house$Electrical)) 
+       , aes(x = reorder(Electrical , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("Electrical") + theme(axis.text.x = element_text(angle = 90))
+
+Functional <- ggplot(subset(train_house , !is.na(train_house$Functional)) 
+       , aes(x = reorder(Functional , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("Functional") + theme(axis.text.x = element_text(angle = 90))
+
+Heating <- ggplot(subset(train_house , !is.na(train_house$Heating)) 
+       , aes(x = reorder(Heating , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("Heating") + theme(axis.text.x = element_text(angle = 90))
+
+
+ggarrange(  CentralAir , Electrical , Functional , Heating
+          ,  ncol = 2, nrow = 2)
+```
+
+
+
+
+
+#### Misc2 
+
+
+```{r Misc2, echo= FALSE}
+
+
+HeatingQC <- ggplot(subset(train_house , !is.na(train_house$HeatingQC)) 
+       , aes(x = reorder(HeatingQC , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("HeatingQC") + theme(axis.text.x = element_text(angle = 90))
+
+HouseStyle <- ggplot(subset(train_house , !is.na(train_house$HouseStyle)) 
+       , aes(x = reorder(HouseStyle , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("HouseStyle") + theme(axis.text.x = element_text(angle = 90))
+
+LotConfig <- ggplot(subset(train_house , !is.na(train_house$LotConfig)) 
+       , aes(x = reorder(LotConfig , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("LotConfig") + theme(axis.text.x = element_text(angle = 90))
+
+SaleCondition <- ggplot(subset(train_house , !is.na(train_house$SaleCondition)) 
+       , aes(x = reorder(SaleCondition , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("SaleCondition") + theme(axis.text.x = element_text(angle = 90))
+
+
+SaleType <- ggplot(subset(train_house , !is.na(train_house$SaleType)) 
+       , aes(x = reorder(SaleType , SalePrice) , y = SalePrice)) +
+  geom_boxplot() + scale_x_discrete("SaleType") + theme(axis.text.x = element_text(angle = 90))
+
+
+ggarrange(  HeatingQC , HouseStyle , LotConfig , SaleCondition , SaleType
+          ,  ncol = 3, nrow = 2)
+```
+
+
+
+
+### Checking the Linearity Assumptions.
+
+- The Saleprice is rightly skewed which means that the assumption of linearity may not be true here. 
+- Log of the Saleprice is normal distribution 
+
+
+```{r SalePrice , echo=FALSE}
+
+df_hist <- data.frame(train_house$SalePrice)
+colnames(df_hist) <- c("SalePrice")
+df_hist$SalePrice_log <- log(df_hist$SalePrice)
+
+norm_hist <- ggplot(df_hist , aes(x = SalePrice)) + geom_histogram(bins = 50)
+logHist <-   ggplot(df_hist , aes(x = SalePrice_log)) + geom_histogram(bins = 50)
+
+
+ggarrange(  norm_hist , logHist,  ncol = 2, nrow = 1)
+
+```
+
+## Performing Data Cleaning 
+
+```{r Data Cleaning, echo= TRUE}
+
+
+train_house <- read.csv("train.csv")
+train_house <- data_cleaning(train_house , thres = 0.4)
+train_house <- feature_eng(train_house)
+
+test_house <- read.csv("test.csv")
+test_house <- TestDataPrep(test_house)
+
+test_Saleprice <- read.csv("sample_submission.csv")
+```
+
+## Modeling
+
+### 1. Multiple Linear Regression with Cross Validation
+
+```{r Linear Model , echo= TRUE}
+library(glmnet)
+library(caret)
+
+custom <- trainControl(method = "repeatedcv",
+                       number = 10, 
+                       repeats = 5, 
+                       verboseIter = T)
+lm <- train(log(SalePrice)~. , 
+            train_house,
+            method = 'lm',
+            trControl = custom)
+
+lm$results
+lm
+summary(lm)
+plot(lm$finalModel)
+
+```
+
+### 2. Ridge Regression with Cross Validation
+
+```{r Ridge , echo= TRUE}
+library(glmnet)
+library(caret)
+
+
+set.seed(1234)
+custom <- trainControl(method = "repeatedcv",
+                       number = 10, 
+                       repeats = 5, 
+                       verboseIter = T)
+
+ridge <- train(log(SalePrice)~. , 
+            train_house,
+            method = 'glmnet',
+            tuneGrid = expand.grid(alpha = 0, 
+                                   lambda = seq(0.0001,1,length = 5)),
+            trControl = custom
+  
+)
+
+plot(ridge)
+ridge
+plot(ridge$finalModel , xvar = 'lambda' , label = T)
+plot(ridge$finalModel , xvar = 'dev' , label = T)
+plot(varImp(ridge , scale = F) , top=30)
+```
+
+### 3. Lasso Regression with Cross Validation
+
+```{r Lasso , echo= TRUE}
+set.seed(1234)
+custom <- trainControl(method = "repeatedcv",
+                       number = 10, 
+                       repeats = 5, 
+                       verboseIter = T)
+
+lasso <- train(log(SalePrice)~. , 
+                    train_house,
+                    method = 'glmnet',
+                    tuneGrid = expand.grid(alpha = 1, 
+                                           lambda = seq(0.0001,0.2,length = 5)),
+                    trControl = custom
+  
+)
+
+plot(lasso)
+lasso
+plot(lasso$finalModel , xvar = 'lambda' , label = T)
+plot(lasso$finalModel , xvar = 'dev' , label = T)
+plot(varImp(lasso , scale = FALSE) , top=30 )
+
+```
+
+# 4. Random Forest Method:
+```{r}
+set.seed(123)
+RF = randomForest(log(train_house$SalePrice)~., data=train_house[-71],
+                        mtry=20, ntree=500,importance=TRUE, na.action = na.omit)
+RF
+
+rmse(log(test_Saleprice$SalePrice), pred.RF )
+mae(log(test_Saleprice$SalePrice), pred.RF)
+mse(log(test_Saleprice$SalePrice), pred.RF)
+
+```
+
+#### Model Comparison
+
+```{r modelComparison , echo= TRUE}
+
+model_list <- list(LinearModel = lm , Ridge = ridge , Lasso = lasso)
+
+res <- resamples(model_list)
+summary(res)
+bwplot(res)
+```
+
+
+
+#### Best Model
+
+```{r Best Model , echo= TRUE}
+lasso$bestTune
+
+best <- lasso$finalModel
+coef(best , s = lasso$bestTune$lambda)
+
+```
+
+
+
+# Prediction
+
+# Multiple Linear Regression with cross validation
+
+```{r}
+pred.lm = predict(lm,newdata=test_house)
+
+rmse(log(test_Saleprice$SalePrice), pred.lm )
+mse(log(test_Saleprice$SalePrice), pred.lm )
+
+```
+
+#Ridge Regression with cross validation
+
+```{r}
+pred.ridge = predict(ridge,newdata=test_house)
+
+rmse(log(test_Saleprice$SalePrice), pred.ridge)
+mse(log(test_Saleprice$SalePrice), pred.ridge)
+```
+
+
+# Lasso Regression with cross Validation
+
+```{r}
+pred.lasso = predict(lasso,newdata=test_house)
+
+rmse(log(test_Saleprice$SalePrice), pred.lasso )
+mse(log(test_Saleprice$SalePrice), pred.lasso)
+```
+
+
+#Random Forest
+
+```{r}
+levels(test_house$Condition2) <- levels(train_house$Condition2)
+levels(test_house$HouseStyle) <- levels(train_house$HouseStyle)
+levels(test_house$Exterior1st) <- levels(train_house$Exterior1st)
+levels(test_house$Exterior2nd) <- levels(train_house$Exterior2nd)
+levels(test_house$RoofMatl) <- levels(train_house$RoofMatl)
+levels(test_house$Heating) <- levels(train_house$Heating)
+levels(test_house$Electrical) <- levels(train_house$Electrical)
+
+pred.RF = predict(RF,newdata=test_house)
+
+rmse(log(test_Saleprice$SalePrice), pred.RF )
+mse(log(test_Saleprice$SalePrice), pred.RF)
+
+
+```
+
+
+
+<!-- #### Prediction -->
+
+<!-- ```{r Predict , echo= TRUE} -->
+
+<!-- p1 <- predict(best , train_house) -->
+<!-- sqrt(mean((train_house$SalePrice - exp(p1))^2)) -->
+
+
+<!-- ``` -->
+
+
+
+
+
+
+<!-- #### RandomForest  -->
+
+<!-- ```{r Rf , echo= TRUE} -->
+<!-- library(randomForest) -->
+
+<!-- rf <- randomForest(SalePrice ~ ., data = train_house, mtry = 3, ntree = 1000,  -->
+<!--                          importance = TRUE, na.action = na.omit) -->
+
+<!-- print(rf) -->
+<!-- importance(rf) -->
+<!-- ``` -->
+
+
+
+#### RandomForest 
+
+```{r stepwise, echo= TRUE}
+model <- lm((log(SalePrice+1)) ~ . , data = train_house)
+base_model <- lm((log(SalePrice+1)) ~ 1, data = train_house)
+step = stepAIC(base_model ,direction = "forward", scope=list(lower=base_model,upper=formula(model)),trace = F)
+
+par(mfrow=c(2,2))
+plot(step)
+step_error <- sqrt(mean(step$residuals^2))
+```
